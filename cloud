@@ -1,0 +1,169 @@
+import math
+
+FS = 1.6          # fator de seguranca
+esp = 0.3           # mm por camada
+n_max = 3   # limite da tabela de propriedades
+flamb = 0.4     # fator de flambagem local de cilindro
+v = 0.05         # poisson
+
+# geometria (mm)
+alavanca_tdp, roda_tdp, L_tdp = 52.2, 40.0, 450.0
+alavanca_tdn, roda_tdn, L_tdn, angulo_tdn = 115.5, 30.0, 136.5, 7
+
+# diametros externos comerciais (mm)
+diametros = [12.7, 15.88, 19.05, 22.2, 25.4, 31.75, 38.1, 44.45]
+
+rho = 1150e-9   # kg/mm3
+E_lam   = [13400, 20520, 36900]    # modulo de elasticidade
+G_lam   = [1200, 3100, 3800]       # modulo de cisalhamento
+tra_lam = [254.5, 285.7, 361.2]    # resistencia a tracao
+com_lam = [203.6, 228.56, 288.96]  # resistencia a compressao
+cis_lam = [74.4, 96.2, 112.1]      # resistencia ao cisalhamento
+
+# casos de carga: vertical, horizontal, lateral (N)
+casos_tdp = [
+    (168.6, 31.6, 0.0),     # 3 pontos
+    (181.3, 33.9, 0.0),     # 2 pontos / 1 ponto
+    (114.2, 0.0, 67.9),     # 2 pontos, carga lateral
+    (114.2, 0.0, 44.8),     # 2 pontos, carga lateral
+    (132.8, 0.0, 105.5),    # taxi: decolagem abortada
+    (76.4, 0.0, 59.6),      # taxi: zigue-zague
+]
+casos_tdn = [
+    (25.3, 4.7, 0.0),       # 3 pontos
+    (9.6, 0.0, 6.3),        # taxi: decolagem abortada
+    (8.0, 0.0, 3.5),        # taxi: zigue-zague
+]
+
+
+def verifica_tdp(casos, alavanca, R, d, n, comp):
+    E = E_lam[n - 1]
+    Sc = com_lam[n - 1]
+    Ss = cis_lam[n - 1]
+    D = d + 2 * n * esp
+    I = math.pi / 64 * (D**4 - d**4)
+    J = math.pi / 32 * (D**4 - d**4)
+    A = math.pi / 4 * (D**2 - d**2)
+    c = D / 2 #ponto mais externo até o centro
+    t = n * esp
+    r_med = (D - t) / 2
+    tc_flam = (flamb * E * t) / (r_med * math.sqrt(3 * (1 - v**2)))  # flambagem local
+
+    t_max = 0.0
+    th_max = 0.0
+
+    for V, H, L in casos:
+        My = (V * alavanca) + (L * R)               # vertical + momento da lateral
+        Mz = H * alavanca                         
+        M = FS * math.sqrt(My**2 + Mz**2)
+        N = FS * L                           # forca axial
+        sig = (M * c) / I + (N / A)          # tensao normal (flexao + axial)
+
+        Vres = FS * math.sqrt(V**2 + H**2)
+        Tq = FS * H * R
+        tau = (2 * Vres / A) + (Tq * c / J)
+        TH = (sig / Sc)**2 + (tau / Ss)**2   # Tsai-Hill
+
+        if sig > t_max:
+            t_max = sig
+        if TH > th_max:
+            th_max = TH
+
+    ms_th = 1 / math.sqrt(th_max) - 1
+    ms_flamb = (tc_flam / t_max) - 1
+    massa = A * comp * rho * 1000
+    return D, ms_th, ms_flamb, massa
+
+
+def verifica_tdn(casos, s, R, d, n, comp):
+    E = E_lam[n - 1]
+    Sc = com_lam[n - 1]
+    Ss = cis_lam[n - 1]
+    D = d + 2 * n * esp
+    I = math.pi / 64 * (D**4 - d**4)
+    J = math.pi / 32 * (D**4 - d**4)
+    A = math.pi / 4 * (D**2 - d**2)
+    c = D / 2
+    t = n * esp
+    r_med = (D - t) / 2
+    tc_flam = flamb * E * t / (r_med * math.sqrt(3 * (1 - v**2)))
+
+    tdn_ang = math.radians(angulo_tdn)
+    sen = math.sin(tdn_ang)
+    cos = math.cos(tdn_ang)
+
+    t_max = 0.0
+    th_max = 0.0
+    for V, H, Lat in casos:
+        for Hs in (H, -H):                                # arrasto para um lado e para o outro
+            N = FS * (V * cos + Hs * sen)           # forca axial (ao longo do tubo)
+            F_in = FS * (V * sen - Hs * cos)        # forca transversal no plano
+            M_in = FS * (Hs * (R + s * cos) - V * s * sen)   # momento de flexao no plano
+            M_lat = FS * Lat * (s + R * cos)        # flexao causada pela lateral
+            T = FS * Lat * R * sen                  # torcao causada pela lateral
+
+            Mt = math.sqrt(M_in**2 + M_lat**2)
+            Ft = math.sqrt(F_in**2 + (FS * Lat)**2)         # forca transversal total
+            sig = (Mt * c / I) + (abs(N) / A)
+            tau = (2 * Ft / A) + (abs(T) * c / J)
+            TH = (sig / Sc)**2 + (tau / Ss)**2
+
+            if sig > t_max:
+                t_max = sig
+            if TH > th_max:
+                th_max = TH
+
+    ms_th = 1 / math.sqrt(th_max) - 1
+    ms_flamb = (tc_flam / t_max) - 1
+    massa = A * comp * rho * 1000
+    return D, ms_th, ms_flamb, massa
+
+
+def dimensiona(nome, tipo, casos, alavanca, R, comp):
+    print(f"\n{nome} | FS = {FS}")
+
+    achou = False
+    melhor_massa = 1000
+    melhor_d = 0
+    melhor_n = 0
+    melhor_D = 0
+    melhor_th = 0
+    melhor_fl = 0
+
+    for d in diametros:
+        for n in range(1, n_max + 1):
+            if tipo == "tdp":
+                D, ms_th, ms_fl, massa = verifica_tdp(casos, alavanca, R, d, n, comp)
+            else:
+                D, ms_th, ms_fl, massa = verifica_tdn(casos, alavanca, R, d, n, comp)
+
+            if ms_th < ms_fl:
+                ms_geral = ms_th
+            else:
+                ms_geral = ms_fl
+
+            if ms_geral >= 0:                      
+                if massa < melhor_massa:           # criterio: MENOR MASSA
+                    achou = True
+                    melhor_massa = massa
+                    melhor_d = d
+                    melhor_n = n
+                    melhor_D = D
+                    melhor_th = ms_th
+                    melhor_fl = ms_fl
+                break
+
+    if not achou:
+        print("nao tanka")
+        return
+
+    print(f"ACHEI! (menor massa, {melhor_massa:.1f} g): molde {melhor_d} mm | {melhor_n} camadas | "
+          f"D final = {melhor_D:.2f} mm")
+    if melhor_th < melhor_fl:
+        print(f"MS GERAL = {melhor_th:.2f}  (critico: tsai-hill)")
+    else:
+        print(f"MS GERAL = {melhor_fl:.2f}  (critico: flambagem)")
+
+
+dimensiona("trem de pouso", "tdp", casos_tdp, alavanca_tdp, roda_tdp, L_tdp)
+dimensiona("bequilha", "tdn", casos_tdn, alavanca_tdn, roda_tdn, L_tdn)
