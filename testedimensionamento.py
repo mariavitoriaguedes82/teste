@@ -128,9 +128,9 @@ def verifica_tdn(casos, s, R, d, n, comp):
 
     for i, (V, H, Lat) in enumerate(casos):
         for Hs in (H, -H):                                # arrasto para um lado e para o outro
-            N = FS * (V * cos + Hs * sen)           # forca axial (ao longo do tubo)
-            F_in = FS * (V * sen - Hs * cos)        # forca transversal no plano
-            M_in = FS * (Hs * (R + (s * cos)) - (V * s * sen))   # momento de flexao no plano
+            N = FS * (V * cos - Hs * sen)           # forca axial (ao longo do tubo)
+            F_in = FS * (V * sen + Hs * cos)        # forca transversal no plano
+            M_in = FS * (Hs * (R + (s * cos)) + (V * s * sen))   # momento de flexao no plano
             M_lat = FS * Lat * (s + (R * cos))        # flexao causada pela lateral
             M = math.sqrt(M_in**2 + M_lat**2)
             F = math.sqrt(F_in**2 + (FS * Lat)**2)         # forca transversal total
